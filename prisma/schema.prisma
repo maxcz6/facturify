@@ -1,0 +1,362 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SunatEnvironment {
+  BETA
+  PRODUCTION
+}
+
+enum CompanyStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum AdminRole {
+  ADMIN
+  SUPERADMIN
+}
+
+enum ApiKeyStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum ApiKeyEnvironment {
+  TEST
+  LIVE
+}
+
+enum WebhookStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum WebhookDeliveryStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum DocumentType {
+  INVOICE
+  RECEIPT
+  CREDIT_NOTE
+  DEBIT_NOTE
+}
+
+enum DocumentStatus {
+  DRAFT
+  PENDING
+  PROCESSING
+  SENT
+  ACCEPTED
+  OBSERVED
+  REJECTED
+  VOIDED
+  ERROR
+}
+
+enum DailySummaryStatus {
+  PENDING
+  SENT
+  ACCEPTED
+  REJECTED
+  ERROR
+}
+
+enum VoidCommunicationStatus {
+  PENDING
+  SENT
+  ACCEPTED
+  REJECTED
+  ERROR
+}
+
+enum IdempotencyStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum OutboxEventStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  DEAD
+}
+
+model Company {
+  id              String               @id @default(uuid())
+  ruc             String               @unique @db.VarChar(11)
+  businessName    String
+  environment     SunatEnvironment
+  status          CompanyStatus        @default(ACTIVE)
+  documents       Document[]
+  apiKeys         ApiKey[]
+  webhooks        Webhook[]
+  deliveries      WebhookDelivery[]
+  sunatCredential SunatCredential?
+  certificates    DigitalCertificate[]
+  dailySummaries  DailySummary[]
+  voidCommunications VoidCommunication[]
+  idempotencyRecords IdempotencyRecord[]
+  outboxEvents       OutboxEvent[]
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+}
+
+model OutboxEvent {
+  id            String            @id @default(uuid())
+  eventId       String            @unique
+  companyId     String
+  company       Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  event         String
+  payload       Json
+  status        OutboxEventStatus @default(PENDING)
+  attempt       Int               @default(0)
+  maxAttempts   Int               @default(5)
+  nextAttemptAt DateTime          @default(now())
+  lockedAt      DateTime?
+  errorCode     String?
+  completedAt   DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([companyId, createdAt])
+}
+
+model IdempotencyRecord {
+  id             String            @id @default(uuid())
+  companyId      String
+  company        Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  keyHash        String
+  fingerprint    String
+  status         IdempotencyStatus @default(IN_PROGRESS)
+  responseStatus Int?
+  responseBody   Json?
+  expiresAt      DateTime
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@unique([companyId, keyHash])
+  @@index([expiresAt])
+}
+
+model VoidCommunication {
+  id            String                  @id @default(uuid())
+  companyId     String
+  company       Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  referenceDate DateTime                @db.Date
+  sequence      Int
+  status        VoidCommunicationStatus @default(PENDING)
+  ticket        String?
+  zipArtifactId String?
+  cdrArtifactId String?
+  sunatCode     String?
+  sunatMessage  String?
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+  documents     VoidCommunicationDocument[]
+
+  @@unique([companyId, referenceDate, sequence])
+  @@index([companyId, status])
+}
+
+model VoidCommunicationDocument {
+  communicationId String
+  documentId      String
+  reason          String
+  communication   VoidCommunication @relation(fields: [communicationId], references: [id], onDelete: Cascade)
+  document        Document          @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  createdAt       DateTime          @default(now())
+
+  @@id([communicationId, documentId])
+  @@index([documentId])
+}
+
+model DailySummary {
+  id            String             @id @default(uuid())
+  companyId     String
+  company       Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  referenceDate DateTime           @db.Date
+  sequence      Int
+  status        DailySummaryStatus @default(PENDING)
+  ticket        String?
+  zipArtifactId String?
+  cdrArtifactId String?
+  sunatCode     String?
+  sunatMessage  String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  documents     DailySummaryDocument[]
+
+  @@unique([companyId, referenceDate, sequence])
+  @@index([companyId, status])
+}
+
+model DailySummaryDocument {
+  summaryId  String
+  documentId String
+  summary    DailySummary @relation(fields: [summaryId], references: [id], onDelete: Cascade)
+  document   Document     @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  createdAt  DateTime     @default(now())
+
+  @@id([summaryId, documentId])
+  @@index([documentId])
+}
+
+model SunatCredential {
+  id                String   @id @default(uuid())
+  companyId         String   @unique
+  company           Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  solUsername       String
+  encryptedPassword String
+  passwordIv        String
+  passwordAuthTag   String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model DigitalCertificate {
+  id                String    @id @default(uuid())
+  companyId         String
+  company           Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  pfxArtifactId     String
+  encryptedPassword String
+  passwordIv        String
+  passwordAuthTag   String
+  serialNumber      String?
+  subjectName       String?
+  validFrom         DateTime?
+  validUntil        DateTime?
+  active            Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([companyId, active])
+}
+
+model AdminUser {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  passwordSalt String
+  role         AdminRole @default(ADMIN)
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model ApiKey {
+  id          String            @id @default(uuid())
+  companyId   String
+  company     Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name        String
+  keyHash     String            @unique
+  prefix      String            @db.VarChar(16)
+  lastFour    String            @db.VarChar(4)
+  environment ApiKeyEnvironment @default(LIVE)
+  status      ApiKeyStatus      @default(ACTIVE)
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([companyId, status])
+}
+
+model Webhook {
+  id              String            @id @default(uuid())
+  companyId       String
+  company         Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  url             String
+  events          String[]
+  encryptedSecret String
+  secretIv        String
+  secretAuthTag   String
+  status          WebhookStatus     @default(ACTIVE)
+  deliveries      WebhookDelivery[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([companyId, status])
+}
+
+model WebhookDelivery {
+  id              String                @id @default(uuid())
+  webhookId       String
+  webhook         Webhook               @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  companyId       String
+  company         Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  event           String
+  payload         Json
+  signatureHeader String
+  attempt         Int                   @default(1)
+  maxAttempts     Int                   @default(3)
+  status          WebhookDeliveryStatus @default(PENDING)
+  statusCode      Int?
+  error           String?
+  durationMs      Int?
+  deliveredAt     DateTime?
+  createdAt       DateTime              @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([webhookId, status])
+}
+
+model Document {
+  id                     String         @id @default(uuid())
+  companyId              String
+  company                Company        @relation(fields: [companyId], references: [id])
+  type                   DocumentType
+  series                 String         @db.VarChar(10)
+  number                 Int
+  customerDocumentType   String?        @db.VarChar(2)
+  customerDocumentNumber String?        @db.VarChar(20)
+  customerName           String?
+  currency               String         @default("PEN") @db.VarChar(3)
+  subtotal               Decimal        @db.Decimal(14, 2)
+  tax                    Decimal        @db.Decimal(14, 2)
+  total                  Decimal        @db.Decimal(14, 2)
+  status                 DocumentStatus @default(PENDING)
+  sunatCode              String?        @db.VarChar(20)
+  sunatMessage           String?
+  referenceDocumentId    String?
+  referenceDocument      Document?      @relation("DocumentAdjustments", fields: [referenceDocumentId], references: [id])
+  adjustments            Document[]     @relation("DocumentAdjustments")
+  adjustmentReasonCode   String?        @db.VarChar(4)
+  adjustmentReason       String?
+  xmlArtifactId          String?
+  zipArtifactId          String?
+  cdrArtifactId          String?
+  issuedAt               DateTime?
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+  items                  DocumentItem[]
+  summaryEntries         DailySummaryDocument[]
+  voidEntries            VoidCommunicationDocument[]
+
+  @@unique([companyId, type, series, number])
+  @@index([companyId, status])
+  @@index([referenceDocumentId])
+}
+
+model DocumentItem {
+  id          String   @id @default(uuid())
+  documentId  String
+  document    Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Decimal  @db.Decimal(14, 4)
+  unitPrice   Decimal  @db.Decimal(14, 2)
+  subtotal    Decimal  @db.Decimal(14, 2)
+  tax         Decimal  @db.Decimal(14, 2)
+  total       Decimal  @db.Decimal(14, 2)
+}

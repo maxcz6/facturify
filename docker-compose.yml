@@ -1,0 +1,56 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://facturify:facturify@postgres:5432/facturify?schema=public
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be configured}
+      BOOTSTRAP_ADMIN_TOKEN: ${BOOTSTRAP_ADMIN_TOKEN:?BOOTSTRAP_ADMIN_TOKEN must be configured}
+      SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:?SECRETS_ENCRYPTION_KEY must be configured}
+      DOCUMENT_STORAGE_PATH: /app/storage/documents
+      CERTIFICATES_STORAGE_PATH: /app/storage/certificates
+      CERTIFICATE_MAX_SIZE_BYTES: ${CERTIFICATE_MAX_SIZE_BYTES:-512000}
+      STORAGE_MAX_XML_BYTES: ${STORAGE_MAX_XML_BYTES:-5242880}
+      STORAGE_MAX_ZIP_BYTES: ${STORAGE_MAX_ZIP_BYTES:-15728640}
+      STORAGE_MAX_CDR_BYTES: ${STORAGE_MAX_CDR_BYTES:-5242880}
+      SUNAT_TIMEOUT_MS: ${SUNAT_TIMEOUT_MS:-30000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - facturify_documents:/app/storage/documents
+      - facturify_certificates:/app/storage/certificates
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: facturify
+      POSTGRES_USER: facturify
+      POSTGRES_PASSWORD: facturify
+    ports:
+      - "5432:5432"
+    volumes:
+      - facturify_postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U facturify -d facturify"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  facturify_postgres:
+  facturify_documents:
+  facturify_certificates:
