@@ -344,4 +344,58 @@ describe('WebhooksModule (with Prisma & SecretsEncryptionService)', () => {
       ).toThrow(ForbiddenException);
     });
   });
+
+  describe('Sanitized delivery failures', () => {
+    it('uses DNS-approved addresses with the pinned HTTPS client instead of fetch', async () => {
+      await controller.register({ url: 'https://public.example/wh', events: ['safe.event'] }, 'cmp_safe');
+      const dnsSafety = { validateWebhookDestination: jest.fn().mockResolvedValue({ allowed: true, addresses: ['203.0.114.10'] }) };
+      const safeClient = { sendWebhook: jest.fn().mockResolvedValue({ statusCode: 204, ok: true, retryAfter: null }) };
+      const guardedService = new WebhooksService(mockPrisma, encryptionService, dnsSafety as never, safeClient as never);
+      global.fetch = jest.fn();
+
+      const result = await guardedService.dispatch('cmp_safe', 'safe.event', { safe: true }, 1);
+
+      expect(safeClient.sendWebhook).toHaveBeenCalledWith(expect.objectContaining({
+        url: 'https://public.example/wh', validatedIps: ['203.0.114.10'], timeoutMs: 5000,
+      }));
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(result[0]).toEqual(expect.objectContaining({ status: 'SUCCESS', statusCode: 204 }));
+    });
+
+    it('blocks an unsafe DNS resolution before fetch and stores only a terminal code', async () => {
+      await controller.register({ url: 'https://public.example/wh', events: ['safe.event'] }, 'cmp_safe');
+      const dnsSafety = { validateWebhookDestination: jest.fn().mockRejectedValue(new BadRequestException('generic')) };
+      const guardedService = new WebhooksService(mockPrisma, encryptionService, dnsSafety as never);
+      global.fetch = jest.fn();
+
+      const result = await guardedService.dispatch('cmp_safe', 'safe.event', {}, 3);
+
+      expect(dnsSafety.validateWebhookDestination).toHaveBeenCalledTimes(1);
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(result[0]).toEqual(expect.objectContaining({ status: 'FAILED', error: 'UNSAFE_DESTINATION', attempt: 1 }));
+    });
+
+    it('never persists an HTTP status text or response details', async () => {
+      await controller.register({ url: 'https://public.example/wh', events: ['safe.event'] }, 'cmp_safe');
+      global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 503, statusText: 'upstream secret details' });
+
+      const result = await service.dispatch('cmp_safe', 'safe.event', {}, 1);
+
+      expect(result[0].error).toBe('HTTP_503');
+      expect(deliveriesDb[0].error).toBe('HTTP_503');
+      expect(JSON.stringify(deliveriesDb[0])).not.toContain('upstream secret details');
+    });
+
+    it('never persists network exception messages, URLs, or credentials', async () => {
+      await controller.register({ url: 'https://public.example/wh', events: ['safe.event'] }, 'cmp_safe');
+      global.fetch = jest.fn().mockRejectedValue(new Error('connect postgres://admin:secret@10.0.0.1 private.pem'));
+
+      const result = await service.dispatch('cmp_safe', 'safe.event', {}, 1);
+
+      expect(result[0].error).toBe('NETWORK_ERROR');
+      expect(deliveriesDb[0].error).toBe('NETWORK_ERROR');
+      expect(JSON.stringify(deliveriesDb[0])).not.toContain('admin:secret');
+      expect(JSON.stringify(deliveriesDb[0])).not.toContain('private.pem');
+    });
+  });
 });

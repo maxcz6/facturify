@@ -13,6 +13,8 @@ import {
   SunatCredentialsStatusResponseDto,
 } from './dto/sunat-credentials-response.dto';
 import { maskSolUsername } from './sunat-credentials.util';
+import { AuditEventBuilderService } from '../audit-events/audit-events.service';
+import { AuditEventWriterService } from '../audit-events/audit-events-writer.service';
 
 @Injectable()
 export class SunatCredentialsService {
@@ -20,6 +22,8 @@ export class SunatCredentialsService {
     private readonly prisma: PrismaService,
     private readonly companySunatConfig: CompanySunatConfigService,
     private readonly _secrets?: SecretsEncryptionService,
+    private readonly auditBuilder?: AuditEventBuilderService,
+    private readonly auditWriter?: AuditEventWriterService,
   ) {}
 
   /**
@@ -30,6 +34,8 @@ export class SunatCredentialsService {
   async upsert(
     companyId: string,
     dto: SaveSunatCredentialsDto,
+    actorId?: string,
+    requestId?: string,
   ): Promise<SunatCredentialsStatusResponseDto> {
     if (!companyId || typeof companyId !== 'string' || companyId.trim() === '') {
       throw new BadRequestException('Company ID is required.');
@@ -69,6 +75,7 @@ export class SunatCredentialsService {
     const record = await this.prisma.sunatCredential.findUnique({
       where: { companyId },
     });
+    await this.appendAudit('sunat_credentials.updated', actorId, companyId, requestId);
 
     return {
       configured: true,
@@ -121,7 +128,7 @@ export class SunatCredentialsService {
    * Checks company existence and company isolation.
    * Responds with { configured: false }.
    */
-  async delete(companyId: string): Promise<DeleteSunatCredentialsResponseDto> {
+  async delete(companyId: string, actorId?: string, requestId?: string): Promise<DeleteSunatCredentialsResponseDto> {
     if (!companyId || typeof companyId !== 'string' || companyId.trim() === '') {
       throw new BadRequestException('Company ID is required.');
     }
@@ -145,9 +152,22 @@ export class SunatCredentialsService {
     await this.prisma.sunatCredential.delete({
       where: { companyId },
     });
+    await this.appendAudit('sunat_credentials.deleted', actorId, companyId, requestId);
 
     return {
       configured: false,
     };
+  }
+
+  private async appendAudit(
+    action: 'sunat_credentials.updated' | 'sunat_credentials.deleted',
+    actorId: string | undefined,
+    companyId: string,
+    requestId?: string,
+  ): Promise<void> {
+    if (!actorId || !this.auditBuilder || !this.auditWriter) return;
+    await this.auditWriter.append(this.auditBuilder.buildSunatCredentialsAction({
+      action, actorId, companyId, requestId,
+    }));
   }
 }

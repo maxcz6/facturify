@@ -79,6 +79,9 @@ CREATE TABLE "DailySummary" (
     "cdrArtifactId" TEXT,
     "sunatCode" TEXT,
     "sunatMessage" TEXT,
+    "pollAttempt" INTEGER NOT NULL DEFAULT 0,
+    "ticketSubmittedAt" TIMESTAMP(3),
+    "nextPollAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -106,6 +109,9 @@ CREATE TABLE "VoidCommunication" (
     "cdrArtifactId" TEXT,
     "sunatCode" TEXT,
     "sunatMessage" TEXT,
+    "pollAttempt" INTEGER NOT NULL DEFAULT 0,
+    "ticketSubmittedAt" TIMESTAMP(3),
+    "nextPollAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     CONSTRAINT "VoidCommunication_pkey" PRIMARY KEY ("id")
@@ -186,6 +192,24 @@ CREATE TABLE "AdminUser" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "AdminUser_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "AuditLog" (
+    "id" TEXT NOT NULL,
+    "eventId" TEXT NOT NULL,
+    "event" TEXT NOT NULL,
+    "apiVersion" VARCHAR(8) NOT NULL,
+    "occurredAt" TIMESTAMP(3) NOT NULL,
+    "actorType" VARCHAR(16) NOT NULL,
+    "actorId" TEXT,
+    "companyId" TEXT,
+    "result" VARCHAR(16) NOT NULL,
+    "publicCode" VARCHAR(64),
+    "requestId" VARCHAR(64),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "AuditLog_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -296,8 +320,24 @@ CREATE UNIQUE INDEX "SunatCredential_companyId_key" ON "SunatCredential"("compan
 -- CreateIndex
 CREATE INDEX "DigitalCertificate_companyId_active_idx" ON "DigitalCertificate"("companyId", "active");
 
+-- Enforce one active signing certificate per tenant under concurrent rotations.
+CREATE UNIQUE INDEX "DigitalCertificate_one_active_per_company_key"
+ON "DigitalCertificate"("companyId") WHERE "active" = true;
+
 -- CreateIndex
 CREATE UNIQUE INDEX "AdminUser_email_key" ON "AdminUser"("email");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "AuditLog_eventId_key" ON "AuditLog"("eventId");
+
+-- CreateIndex
+CREATE INDEX "AuditLog_companyId_occurredAt_idx" ON "AuditLog"("companyId", "occurredAt");
+
+-- CreateIndex
+CREATE INDEX "AuditLog_actorId_occurredAt_idx" ON "AuditLog"("actorId", "occurredAt");
+
+-- CreateIndex
+CREATE INDEX "AuditLog_event_occurredAt_idx" ON "AuditLog"("event", "occurredAt");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "ApiKey_keyHash_key" ON "ApiKey"("keyHash");
@@ -355,6 +395,31 @@ CREATE INDEX "OutboxEvent_companyId_createdAt_idx" ON "OutboxEvent"("companyId",
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Document_companyId_type_series_number_key" ON "Document"("companyId", "type", "series", "number");
+
+-- Database-level invariants for values that must never become invalid even if
+-- a future writer bypasses the HTTP validation layer.
+ALTER TABLE "Document"
+  ADD CONSTRAINT "Document_number_positive_check" CHECK ("number" > 0),
+  ADD CONSTRAINT "Document_amounts_nonnegative_check" CHECK ("subtotal" >= 0 AND "tax" >= 0 AND "total" >= 0),
+  ADD CONSTRAINT "Document_total_consistent_check" CHECK ("total" = "subtotal" + "tax");
+
+ALTER TABLE "DocumentItem"
+  ADD CONSTRAINT "DocumentItem_quantity_positive_check" CHECK ("quantity" > 0),
+  ADD CONSTRAINT "DocumentItem_unitPrice_positive_check" CHECK ("unitPrice" > 0),
+  ADD CONSTRAINT "DocumentItem_amounts_nonnegative_check" CHECK ("subtotal" >= 0 AND "tax" >= 0 AND "total" >= 0),
+  ADD CONSTRAINT "DocumentItem_total_consistent_check" CHECK ("total" = "subtotal" + "tax");
+
+ALTER TABLE "DailySummary"
+  ADD CONSTRAINT "DailySummary_sequence_positive_check" CHECK ("sequence" > 0),
+  ADD CONSTRAINT "DailySummary_pollAttempt_nonnegative_check" CHECK ("pollAttempt" >= 0);
+
+ALTER TABLE "VoidCommunication"
+  ADD CONSTRAINT "VoidCommunication_sequence_positive_check" CHECK ("sequence" > 0),
+  ADD CONSTRAINT "VoidCommunication_pollAttempt_nonnegative_check" CHECK ("pollAttempt" >= 0);
+
+ALTER TABLE "OutboxEvent"
+  ADD CONSTRAINT "OutboxEvent_attempt_nonnegative_check" CHECK ("attempt" >= 0),
+  ADD CONSTRAINT "OutboxEvent_maxAttempts_positive_check" CHECK ("maxAttempts" > 0);
 
 -- AddForeignKey
 ALTER TABLE "SunatCredential" ADD CONSTRAINT "SunatCredential_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "Company"("id") ON DELETE CASCADE ON UPDATE CASCADE;

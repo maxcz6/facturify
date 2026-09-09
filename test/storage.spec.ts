@@ -32,7 +32,9 @@ describe('DocumentStorageService (Artifact Storage & Path Traversal Prevention)'
   afterEach(async () => {
     try {
       await fs.rm(tempStorageDir, { recursive: true, force: true });
-    } catch {}
+    } catch {
+      // Best-effort cleanup for isolated test storage.
+    }
   });
 
   describe('Artifact Saving (XML, ZIP, CDR)', () => {
@@ -184,7 +186,9 @@ describe('DocumentStorageService (Artifact Storage & Path Traversal Prevention)'
     afterEach(async () => {
       try {
         await fs.rm(customStorageDir, { recursive: true, force: true });
-      } catch {}
+      } catch {
+        // Best-effort cleanup for isolated test storage.
+      }
     });
 
     it('should reject XML exceeding STORAGE_MAX_XML_BYTES', async () => {

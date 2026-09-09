@@ -5,9 +5,10 @@ import { CertificateStorageService } from './certificate-storage.service';
 import { CertificatesController } from './certificates.controller';
 import { CertificatesService } from './certificates.service';
 import { Pkcs12ExtractorService } from './pkcs12-extractor.service';
+import { AuditEventsModule } from '../audit-events/audit-events.module';
 
 @Module({
-  imports: [AuthModule, SecurityModule],
+  imports: [AuthModule, SecurityModule, AuditEventsModule],
   controllers: [CertificatesController],
   providers: [CertificateStorageService, CertificatesService, Pkcs12ExtractorService],
   exports: [CertificatesService, CertificateStorageService, Pkcs12ExtractorService],

@@ -15,6 +15,10 @@ import { CertificateStorageService } from '../src/certificates/certificate-stora
 import { CertificatesController } from '../src/certificates/certificates.controller';
 import { CertificatesService } from '../src/certificates/certificates.service';
 import { SecretsEncryptionService } from '../src/security/secrets-encryption.service';
+import * as crypto from 'node:crypto';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 describe('CertificatesModule (Digital Certificates Management)', () => {
   let certificatesService: CertificatesService;
@@ -29,6 +33,7 @@ describe('CertificatesModule (Digital Certificates Management)', () => {
   let mockPrisma: any;
   let certsDb: Map<string, DigitalCertificate>;
   let companiesDb: Map<string, { id: string; ruc: string; businessName: string }>;
+  let testStorageRoot: string;
 
   const companyA = 'cmp_alpha_111';
   const companyB = 'cmp_beta_222';
@@ -45,6 +50,7 @@ describe('CertificatesModule (Digital Certificates Management)', () => {
   const twoDaysAgo = new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString();
 
   beforeEach(() => {
+    testStorageRoot = path.join(os.tmpdir(), `facturify-certificates-${crypto.randomUUID()}`);
     certsDb = new Map<string, DigitalCertificate>();
     companiesDb = new Map();
 
@@ -57,6 +63,7 @@ describe('CertificatesModule (Digital Certificates Management)', () => {
       get: jest.fn().mockImplementation((key: string) => {
         if (key === 'SECRETS_ENCRYPTION_KEY') return test32ByteKey;
         if (key === 'CERTIFICATE_MAX_SIZE_BYTES') return 100 * 1024; // 100 KB limit for test
+        if (key === 'CERTIFICATES_STORAGE_PATH') return testStorageRoot;
         return undefined;
       }),
     } as unknown as ConfigService;
@@ -141,6 +148,10 @@ describe('CertificatesModule (Digital Certificates Management)', () => {
     jwtGuard = new JwtAuthGuard(jwtService);
     reflector = new Reflector();
     rolesGuard = new RolesGuard(reflector);
+  });
+
+  afterEach(async () => {
+    await fs.rm(testStorageRoot, { recursive: true, force: true });
   });
 
   describe('Validation & Format Constraints', () => {
@@ -247,7 +258,7 @@ describe('CertificatesModule (Digital Certificates Management)', () => {
 
   describe('Cifrado en reposo (AES-256-GCM Encryption at Rest)', () => {
     it('should encrypt both password and PKCS#12 payload with AES-256-GCM before persisting', async () => {
-      const response = await certificatesService.register({
+      await certificatesService.register({
         companyId: companyA,
         pfxBase64: validPfxBase64,
         password: testPassword,

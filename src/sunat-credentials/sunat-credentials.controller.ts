@@ -26,6 +26,9 @@ import {
   SunatCredentialsStatusResponseDto,
 } from './dto/sunat-credentials-response.dto';
 import { SunatCredentialsService } from './sunat-credentials.service';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { RequestId } from '../http-safety/decorators/request-id.decorator';
 
 @ApiTags('Companies - SUNAT Credentials')
 @Controller('companies/:companyId/sunat-credentials')
@@ -50,8 +53,10 @@ export class SunatCredentialsController {
   async update(
     @Param('companyId') companyId: string,
     @Body() dto: SaveSunatCredentialsDto,
+    @CurrentUser() actor?: JwtPayload,
+    @RequestId() requestId?: string,
   ): Promise<SunatCredentialsStatusResponseDto> {
-    return this.sunatCredentialsService.upsert(companyId, dto);
+    return this.sunatCredentialsService.upsert(companyId, dto, actor?.sub, requestId);
   }
 
   @Get('status')
@@ -85,7 +90,9 @@ export class SunatCredentialsController {
   })
   async delete(
     @Param('companyId') companyId: string,
+    @CurrentUser() actor?: JwtPayload,
+    @RequestId() requestId?: string,
   ): Promise<DeleteSunatCredentialsResponseDto> {
-    return this.sunatCredentialsService.delete(companyId);
+    return this.sunatCredentialsService.delete(companyId, actor?.sub, requestId);
   }
 }

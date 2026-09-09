@@ -11,6 +11,7 @@ export interface WebhookDeliveryLog {
   attempt: number;
   maxAttempts: number;
   statusCode?: number;
+  retryAfter?: string | null;
   status: DeliveryStatus;
   error?: string;
   timestamp: number;

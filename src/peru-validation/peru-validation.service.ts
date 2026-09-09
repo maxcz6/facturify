@@ -1,7 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   DOCUMENT_TYPE_NORMALIZATION,
-  IDENTITY_DOCUMENT_NAMES,
   RUC_FACTORS,
   SUPPORTED_CURRENCIES,
   VALID_RUC_PREFIXES,

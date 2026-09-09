@@ -5,12 +5,12 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { Document } from '@prisma/client';
 import { CurrentCompanyId } from '../api-keys/decorators/current-company-id.decorator';
 import { ApiKeyGuard } from '../api-keys/guards/api-key.guard';
 import { CreateReceiptDto } from './dto/create-receipt.dto';
 import { ReceiptsService } from './receipts.service';
 import { IdempotencyInterceptor } from '../idempotency/idempotency.interceptor';
+import { CreatedDocumentResponseDto, toCreatedDocumentResponse } from '../documents/dto/created-document-response.dto';
 
 @ApiTags('Receipts')
 @Controller('receipts')
@@ -25,11 +25,11 @@ export class ReceiptsController {
     summary: 'Issue an Electronic Receipt (Boleta de Venta)',
     description: 'Facade endpoint that fixes DocumentType to RECEIPT and delegates calculation/persistence to DocumentsService.',
   })
-  @ApiCreatedResponse({ description: 'Receipt registered with status PENDING.' })
-  create(
+  @ApiCreatedResponse({ type: CreatedDocumentResponseDto, description: 'Receipt registered with status PENDING.' })
+  async create(
     @Body() input: CreateReceiptDto,
     @CurrentCompanyId() companyId?: string,
-  ): Promise<Document> {
-    return this.receiptsService.create(input, companyId);
+  ): Promise<CreatedDocumentResponseDto> {
+    return toCreatedDocumentResponse(await this.receiptsService.create(input, companyId));
   }
 }

@@ -3,12 +3,10 @@ import {
   MAX_WEBHOOK_ATTEMPTS,
   MAX_RETRY_DELAY_MS,
   RETRYABLE_HTTP_STATUS_CODES,
-  PROHIBITED_OUTPUT_FIELDS,
 } from './webhook-policy.constants';
 import {
   WebhookDeliveryContext,
   WebhookDeliveryDecision,
-  WebhookDeliveryOutcome,
 } from './webhook-policy.interface';
 import {
   calculateExponentialBackoff,

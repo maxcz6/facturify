@@ -1,7 +1,3 @@
-export interface JwtPayload {
-  sub: string;
-  email: string;
-  role: 'ADMIN' | 'SUPERADMIN';
-  iat?: number;
-  exp?: number;
-}
+import { AdminTokenClaims } from '../../admin-token-policy/admin-token-policy.interface';
+
+export type JwtPayload = AdminTokenClaims;

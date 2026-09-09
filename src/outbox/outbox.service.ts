@@ -62,7 +62,8 @@ export class OutboxService {
           const decisions = deliveries.filter((delivery) => delivery.status !== 'SUCCESS').map((delivery) =>
             this.policy?.evaluate({
               attempt, maxAttempts: event.maxAttempts, statusCode: delivery.statusCode,
-              isNetworkError: delivery.statusCode === undefined, jitter: 0,
+              isNetworkError: delivery.error === 'NETWORK_ERROR',
+              isTimeout: delivery.error === 'TIMEOUT', retryAfter: delivery.retryAfter ?? undefined, jitter: 0,
             }),
           ).filter(Boolean);
           const retryable = decisions.length === 0 || decisions.some((decision) => decision!.retryable);

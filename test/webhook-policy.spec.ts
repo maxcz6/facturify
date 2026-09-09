@@ -6,9 +6,7 @@ import {
   MAX_WEBHOOK_ATTEMPTS,
   INITIAL_RETRY_DELAY_MS,
   MAX_RETRY_DELAY_MS,
-  RETRYABLE_HTTP_STATUS_CODES,
   calculateExponentialBackoff,
-  parseRetryAfter,
 } from '../src/webhook-policy';
 
 describe('WebhookDeliveryPolicyService', () => {

@@ -73,6 +73,7 @@ describe('ApiKeysModule (with Prisma Mock)', () => {
         }),
       },
     } as unknown as PrismaService;
+    mockPrisma.$transaction = jest.fn(async (operation: (tx: PrismaService) => unknown) => operation(mockPrisma));
 
     service = new ApiKeysService(mockPrisma as any);
     guard = new ApiKeyGuard(service);
@@ -94,6 +95,7 @@ describe('ApiKeysModule (with Prisma Mock)', () => {
       expect(created.companyId).toBe('cmp_test_123');
       expect(created.status).toBe('ACTIVE');
       expect(created.lastFour.length).toBe(4);
+      expect(created).not.toHaveProperty('keyHash');
     });
 
     it('should validate an active API Key', async () => {
@@ -107,6 +109,7 @@ describe('ApiKeysModule (with Prisma Mock)', () => {
       expect(validated?.id).toBe(created.id);
       expect(validated?.companyId).toBe('cmp_test_123');
       expect(validated?.lastUsedAt).toBeDefined();
+      expect(validated).not.toHaveProperty('keyHash');
     });
 
     it('should return null for non-existent or tampered API Key', async () => {

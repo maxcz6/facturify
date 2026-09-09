@@ -8,14 +8,20 @@ RUN npx prisma generate
 COPY . .
 RUN npm run build
 
-FROM node:24-alpine
+FROM build AS migration
+CMD ["npx", "prisma", "migrate", "deploy"]
+
+FROM build AS runtime-dependencies
+RUN npm prune --omit=dev --omit=peer
+RUN npm uninstall prisma --omit=dev --omit=peer && npm prune --omit=dev --omit=peer
+RUN test ! -d node_modules/prisma && test ! -d node_modules/@prisma/config
+
+FROM node:24-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 RUN apk add --no-cache openssl
 COPY package*.json ./
-COPY prisma ./prisma
-RUN npm ci --omit=dev
-RUN npx prisma generate
+COPY --from=runtime-dependencies /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 EXPOSE 3000
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main"]
+CMD ["node", "dist/main"]

@@ -5,7 +5,6 @@ export interface ApiKeyRecord {
   id: string;
   companyId: string;
   name: string;
-  keyHash: string;
   prefix: string;
   lastFour: string;
   environment: ApiKeyEnvironment;

@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AdminRole } from '@prisma/client';
-import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export { AdminRole };
 
@@ -16,7 +16,8 @@ export class BootstrapAdminDto {
 
   @ApiProperty({ example: 'SuperSecurePass123!', description: 'Password (min 8 chars)' })
   @IsString()
-  @MinLength(8)
+  @MinLength(12)
+  @MaxLength(128)
   password!: string;
 
   @ApiProperty({
@@ -40,7 +41,8 @@ export class CreateAdminDto {
 
   @ApiProperty({ example: 'SecureAdminPass123!', description: 'Password (min 8 chars)' })
   @IsString()
-  @MinLength(8)
+  @MinLength(12)
+  @MaxLength(128)
   password!: string;
 
   @ApiPropertyOptional({

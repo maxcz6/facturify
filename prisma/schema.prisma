@@ -160,6 +160,9 @@ model VoidCommunication {
   cdrArtifactId String?
   sunatCode     String?
   sunatMessage  String?
+  pollAttempt   Int                     @default(0)
+  ticketSubmittedAt DateTime?
+  nextPollAt    DateTime?
   createdAt     DateTime                @default(now())
   updatedAt     DateTime                @updatedAt
   documents     VoidCommunicationDocument[]
@@ -192,6 +195,9 @@ model DailySummary {
   cdrArtifactId String?
   sunatCode     String?
   sunatMessage  String?
+  pollAttempt   Int                @default(0)
+  ticketSubmittedAt DateTime?
+  nextPollAt    DateTime?
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
   documents     DailySummaryDocument[]
@@ -252,6 +258,27 @@ model AdminUser {
   active       Boolean   @default(true)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
+}
+
+/// Append-only security audit record. Actor and company identifiers deliberately
+/// have no foreign keys so historical evidence survives operational deletions.
+model AuditLog {
+  id          String   @id @default(uuid())
+  eventId     String   @unique
+  event       String
+  apiVersion  String   @db.VarChar(8)
+  occurredAt  DateTime
+  actorType   String   @db.VarChar(16)
+  actorId     String?
+  companyId   String?
+  result      String   @db.VarChar(16)
+  publicCode  String?  @db.VarChar(64)
+  requestId   String?  @db.VarChar(64)
+  createdAt   DateTime @default(now())
+
+  @@index([companyId, occurredAt])
+  @@index([actorId, occurredAt])
+  @@index([event, occurredAt])
 }
 
 model ApiKey {

@@ -26,6 +26,7 @@ import {
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
+import { RequestId } from '../http-safety/decorators/request-id.decorator';
 
 @ApiTags('Auth (Facturify Admins)')
 @Controller('auth')
@@ -38,8 +39,8 @@ export class AuthController {
     description: 'Can only be executed once when zero administrators exist. Requires secret BOOTSTRAP_ADMIN_TOKEN.',
   })
   @ApiCreatedResponse({ description: 'Initial SuperAdmin created successfully.' })
-  async bootstrap(@Body() dto: BootstrapAdminDto) {
-    return this.authService.bootstrapInitialAdmin(dto);
+  async bootstrap(@Body() dto: BootstrapAdminDto, @RequestId() requestId?: string) {
+    return this.authService.bootstrapInitialAdmin(dto, requestId);
   }
 
   @Post('register')
@@ -54,16 +55,17 @@ export class AuthController {
   async register(
     @CurrentUser() creator: JwtPayload,
     @Body() dto: CreateAdminDto,
+    @RequestId() requestId?: string,
   ) {
-    return this.authService.createAdmin(creator, dto);
+    return this.authService.createAdmin(creator, dto, requestId);
   }
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Log in as a Facturify admin to obtain a JWT' })
   @ApiOkResponse({ description: 'Admin authenticated, returns JWT token.' })
-  async login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  async login(@Body() dto: LoginDto, @RequestId() requestId?: string) {
+    return this.authService.login(dto, requestId);
   }
 
   @Get('profile')

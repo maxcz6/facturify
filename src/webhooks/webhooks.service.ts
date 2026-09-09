@@ -2,6 +2,8 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  BadRequestException,
+  Optional,
 } from '@nestjs/common';
 import {
   WebhookDeliveryStatus,
@@ -21,6 +23,9 @@ import {
 } from './interfaces/webhook.interface';
 import { WebhookCrypto } from './webhooks.crypto';
 import { WebhookValidator } from './webhooks.validator';
+import { WebhookDnsSafetyService } from '../webhook-dns-safety/webhook-dns-safety.service';
+import { SafeWebhookHttpClient } from '../safe-webhook-client/safe-webhook-client.service';
+import { SafeWebhookClientException } from '../safe-webhook-client/safe-webhook-client.interface';
 
 @Injectable()
 export class WebhooksService {
@@ -29,6 +34,8 @@ export class WebhooksService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly encryption: SecretsEncryptionService,
+    @Optional() private readonly dnsSafety?: WebhookDnsSafetyService,
+    @Optional() private readonly safeClient?: SafeWebhookHttpClient,
   ) {}
 
   async register(
@@ -270,7 +277,28 @@ export class WebhooksService {
     for (let attempt = 1; attempt <= deliveryLog.maxAttempts; attempt++) {
       deliveryLog.attempt = attempt;
       try {
-        const response = await fetch(url, {
+        const destination = await this.dnsSafety?.validateWebhookDestination(url);
+        if (destination && this.safeClient) {
+          const response = await this.safeClient.sendWebhook({
+            url, validatedIps: destination.addresses, payload: payloadString,
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Facturify-Signature': signatureHeader,
+              'User-Agent': 'Facturify-Webhooks/1.0',
+            },
+            timeoutMs: 5000,
+          });
+          deliveryLog.statusCode = response.statusCode;
+          deliveryLog.retryAfter = response.retryAfter;
+          deliveryLog.durationMs = Date.now() - startTime;
+          if (response.ok) {
+            deliveryLog.status = 'SUCCESS';
+            deliveryLog.deliveredAt = new Date();
+            return;
+          }
+          deliveryLog.error = `HTTP_${response.statusCode}`;
+        } else {
+          const response = await fetch(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -279,21 +307,32 @@ export class WebhooksService {
           },
           body: payloadString,
           signal: AbortSignal.timeout(5000),
-        });
+          });
 
-        deliveryLog.statusCode = response.status;
-        deliveryLog.durationMs = Date.now() - startTime;
+          deliveryLog.statusCode = response.status;
+          deliveryLog.durationMs = Date.now() - startTime;
 
-        if (response.ok) {
-          deliveryLog.status = 'SUCCESS';
-          deliveryLog.deliveredAt = new Date();
-          return;
-        } else {
-          deliveryLog.error = `HTTP error ${response.status}: ${response.statusText}`;
+          if (response.ok) {
+            deliveryLog.status = 'SUCCESS';
+            deliveryLog.deliveredAt = new Date();
+            return;
+          }
+          deliveryLog.error = `HTTP_${response.status}`;
         }
-      } catch (err: any) {
-        deliveryLog.error = err?.message || 'Network/connection error';
-        deliveryLog.durationMs = Date.now() - startTime;
+      } catch (err: unknown) {
+        if (err instanceof BadRequestException && this.dnsSafety) {
+          deliveryLog.error = 'UNSAFE_DESTINATION';
+          deliveryLog.durationMs = Date.now() - startTime;
+          break;
+        }
+        if (err instanceof SafeWebhookClientException) {
+          deliveryLog.error = err.code;
+          deliveryLog.durationMs = Date.now() - startTime;
+          if (err.code !== 'TIMEOUT' && err.code !== 'NETWORK_ERROR') break;
+        } else {
+          deliveryLog.error = this.safeDeliveryErrorCode(err);
+          deliveryLog.durationMs = Date.now() - startTime;
+        }
       }
 
       if (attempt < deliveryLog.maxAttempts) {
@@ -302,5 +341,12 @@ export class WebhooksService {
     }
 
     deliveryLog.status = 'FAILED';
+  }
+
+  private safeDeliveryErrorCode(error: unknown): 'TIMEOUT' | 'NETWORK_ERROR' {
+    if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+      return 'TIMEOUT';
+    }
+    return 'NETWORK_ERROR';
   }
 }

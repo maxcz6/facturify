@@ -3,10 +3,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: runtime
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgresql://facturify:facturify@postgres:5432/facturify?schema=public
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
+      DATABASE_URL: postgresql://facturify:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be configured}@postgres:5432/facturify?schema=public
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be configured}
       BOOTSTRAP_ADMIN_TOKEN: ${BOOTSTRAP_ADMIN_TOKEN:?BOOTSTRAP_ADMIN_TOKEN must be configured}
       SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:?SECRETS_ENCRYPTION_KEY must be configured}
@@ -17,30 +19,44 @@ services:
       STORAGE_MAX_ZIP_BYTES: ${STORAGE_MAX_ZIP_BYTES:-15728640}
       STORAGE_MAX_CDR_BYTES: ${STORAGE_MAX_CDR_BYTES:-5242880}
       SUNAT_TIMEOUT_MS: ${SUNAT_TIMEOUT_MS:-30000}
+      OUTBOX_POLL_INTERVAL_MS: ${OUTBOX_POLL_INTERVAL_MS:-5000}
+      OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-20}
     ports:
       - "3000:3000"
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
     volumes:
       - facturify_documents:/app/storage/documents
       - facturify_certificates:/app/storage/certificates
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/v1/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 20s
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migration
+    environment:
+      DATABASE_URL: postgresql://facturify:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be configured}@postgres:5432/facturify?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
   postgres:
     image: postgres:17-alpine
     environment:
       POSTGRES_DB: facturify
       POSTGRES_USER: facturify
-      POSTGRES_PASSWORD: facturify
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be configured}
     volumes:
       - facturify_postgres:/var/lib/postgresql/data
     restart: unless-stopped

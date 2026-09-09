@@ -4,3 +4,10 @@ dist
 .env
 coverage
 *.log
+storage
+test
+docs
+.agents
+.codex
+.env.*
+!.env.docker.example

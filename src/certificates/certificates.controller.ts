@@ -26,6 +26,9 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { CertificateResponseDto } from './dto/certificate-response.dto';
 import { RegisterCertificateDto } from './dto/register-certificate.dto';
 import { CertificatesService } from './certificates.service';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { RequestId } from '../http-safety/decorators/request-id.decorator';
 
 @ApiTags('Certificates')
 @Controller('certificates')
@@ -47,8 +50,10 @@ export class CertificatesController {
   })
   async register(
     @Body() dto: RegisterCertificateDto,
+    @CurrentUser() actor?: JwtPayload,
+    @RequestId() requestId?: string,
   ): Promise<CertificateResponseDto> {
-    return this.certificatesService.register(dto);
+    return this.certificatesService.register(dto, actor?.sub, requestId);
   }
 
   @Post('company/:companyId')
@@ -60,8 +65,10 @@ export class CertificatesController {
   async registerForCompany(
     @Param('companyId') companyId: string,
     @Body() dto: RegisterCertificateDto,
+    @CurrentUser() actor?: JwtPayload,
+    @RequestId() requestId?: string,
   ): Promise<CertificateResponseDto> {
-    return this.certificatesService.register({ ...dto, companyId });
+    return this.certificatesService.register({ ...dto, companyId }, actor?.sub, requestId);
   }
 
   @Get('company/:companyId')
@@ -94,9 +101,11 @@ export class CertificatesController {
     @Param('id') id: string,
     @Query('companyId') queryCompanyId?: string,
     @Body('companyId') bodyCompanyId?: string,
+    @CurrentUser() actor?: JwtPayload,
+    @RequestId() requestId?: string,
   ): Promise<CertificateResponseDto> {
     const companyId = queryCompanyId || bodyCompanyId;
-    return this.certificatesService.deactivate(id, companyId);
+    return this.certificatesService.deactivate(id, companyId, actor?.sub, requestId);
   }
 
   @Patch('company/:companyId/:id/deactivate')
@@ -110,8 +119,10 @@ export class CertificatesController {
   async deactivateWithCompany(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
+    @CurrentUser() actor?: JwtPayload,
+    @RequestId() requestId?: string,
   ): Promise<CertificateResponseDto> {
-    return this.certificatesService.deactivate(id, companyId);
+    return this.certificatesService.deactivate(id, companyId, actor?.sub, requestId);
   }
 
   @Delete(':id')
@@ -124,7 +135,9 @@ export class CertificatesController {
   async delete(
     @Param('id') id: string,
     @Query('companyId') queryCompanyId?: string,
+    @CurrentUser() actor?: JwtPayload,
+    @RequestId() requestId?: string,
   ): Promise<CertificateResponseDto> {
-    return this.certificatesService.deactivate(id, queryCompanyId);
+    return this.certificatesService.deactivate(id, queryCompanyId, actor?.sub, requestId);
   }
 }

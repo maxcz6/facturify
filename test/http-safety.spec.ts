@@ -6,7 +6,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { NextFunction, Request, Response } from 'express';
-import { RequestId } from '../src/http-safety/decorators/request-id.decorator';
 import { UniformExceptionFilter } from '../src/http-safety/filters/uniform-exception.filter';
 import { HttpSafetyModule } from '../src/http-safety/http-safety.module';
 import { RequestIdMiddleware } from '../src/http-safety/middlewares/request-id.middleware';
@@ -219,6 +218,21 @@ describe('HttpSafetyModule (Request IDs & Uniform Error Format)', () => {
       expect(responseBody.message).toBe('Forbidden Action');
     });
 
+    it('preserves a safe rate-limit code and emits a bounded Retry-After header', () => {
+      const exception = new HttpException({
+        code: 'AUTH_RATE_LIMITED', message: 'Authentication rate limit exceeded.', retryAfterSeconds: 900,
+      }, HttpStatus.TOO_MANY_REQUESTS);
+
+      filter.catch(exception, mockHost);
+
+      expect(responseStatus).toBe(429);
+      expect(responseHeaders['retry-after']).toBe('900');
+      expect(responseBody).toEqual(expect.objectContaining({
+        code: 'AUTH_RATE_LIMITED', retryAfterSeconds: 900,
+        message: 'Authentication rate limit exceeded.',
+      }));
+    });
+
     it('should format unhandled 500 Error without leaking internal stack traces in production', () => {
       const originalEnv = process.env.NODE_ENV;
       process.env.NODE_ENV = 'production';
@@ -290,7 +304,7 @@ describe('HttpSafetyModule (Request IDs & Uniform Error Format)', () => {
       module.configure(mockConsumer as any);
 
       expect(mockConsumer.apply).toHaveBeenCalledWith(RequestIdMiddleware);
-      expect(mockConsumer.forRoutes).toHaveBeenCalledWith('*');
+      expect(mockConsumer.forRoutes).toHaveBeenCalledWith('{*path}');
     });
   });
 });

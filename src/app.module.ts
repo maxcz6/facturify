@@ -21,10 +21,15 @@ import { XmlModule } from './xml/xml.module';
 import { SunatModule } from './sunat/sunat.module';
 import { SunatCredentialsModule } from './sunat-credentials/sunat-credentials.module';
 import { StorageModule } from './storage/storage.module';
+import { ApplicationConfigValidationService } from './config-validation/config-validation.service';
+import { AuditQueriesModule } from './audit-queries/audit-queries.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      validate: (environment) => ({ ...new ApplicationConfigValidationService().validate(environment) }),
+    }),
     PrismaModule,
     ProcessingModule,
     SecurityModule,
@@ -46,6 +51,7 @@ import { StorageModule } from './storage/storage.module';
     SunatModule,
     SunatCredentialsModule,
     StorageModule,
+    AuditQueriesModule,
   ],
 })
 export class AppModule {}

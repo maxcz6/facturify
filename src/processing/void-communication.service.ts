@@ -13,6 +13,7 @@ import { XmlSignatureService } from '../xml/xml-signature.service';
 import { VoidDocumentDto } from './dto/create-void-communication.dto';
 import { DocumentLifecycleService } from '../document-lifecycle/document-lifecycle.service';
 import { DocumentEventOutboxService } from '../outbox/document-event-outbox.service';
+import { SunatTicketPollingPolicyService } from '../sunat-ticket-policy/sunat-ticket-polling-policy.service';
 
 const TYPE_CODES = { INVOICE: '01', CREDIT_NOTE: '07', DEBIT_NOTE: '08' } as const;
 
@@ -31,6 +32,7 @@ export class VoidCommunicationService {
     private readonly cdr: CdrService,
     private readonly lifecycle: DocumentLifecycleService,
     private readonly eventOutbox?: DocumentEventOutboxService,
+    private readonly ticketPolicy?: SunatTicketPollingPolicyService,
   ) {}
 
   async createAndSend(companyId: string, referenceDateText: string, requests: VoidDocumentDto[]) {
@@ -80,7 +82,8 @@ export class VoidCommunicationService {
       const sol = await this.credentials.getDecryptedSolCredential(companyId);
       const sent = await this.gateway.sendSummary({ fileName: packed.zipFileName, zipContent: packed.content,
         credentials: { ruc: sol.ruc, solUsername: sol.username, solPassword: sol.password }, environment: sol.environment });
-      await this.prisma.voidCommunication.update({ where: { id: communication.id }, data: { status: VoidCommunicationStatus.SENT, ticket: sent.ticket, zipArtifactId } });
+      await this.prisma.voidCommunication.update({ where: { id: communication.id }, data: { status: VoidCommunicationStatus.SENT,
+        ticket: sent.ticket, zipArtifactId, pollAttempt: 0, ticketSubmittedAt: new Date(), nextPollAt: null } });
       return { id: communication.id, status: VoidCommunicationStatus.SENT, ticket: sent.ticket, documentCount: documents.length };
     } catch (error) {
       if (zipArtifactId) await this.storage.delete(companyId, zipArtifactId).catch(() => false);
@@ -93,10 +96,39 @@ export class VoidCommunicationService {
     const communication = await this.prisma.voidCommunication.findFirst({ where: { id, companyId }, include: { documents: true } });
     if (!communication) throw new NotFoundException('Void communication not found.');
     if (communication.status !== VoidCommunicationStatus.SENT || !communication.ticket) throw new ConflictException('Void communication has no pending ticket.');
+    const now = new Date();
+    if (this.ticketPolicy && communication.nextPollAt && communication.nextPollAt > now) {
+      throw new ConflictException('SUNAT ticket is not ready for another status check.');
+    }
+    let claimed = communication;
+    if (this.ticketPolicy) {
+      const leaseUntil = new Date(now.getTime() + 120_000);
+      const claim = await this.prisma.voidCommunication.updateMany({
+        where: { id, status: VoidCommunicationStatus.SENT,
+          OR: [{ nextPollAt: null }, { nextPollAt: { lte: now } }] },
+        data: { pollAttempt: { increment: 1 }, nextPollAt: leaseUntil },
+      });
+      if (claim.count !== 1) throw new ConflictException('SUNAT ticket status check is already in progress.');
+      claimed = (await this.prisma.voidCommunication.findUnique({ where: { id }, include: { documents: true } }))!;
+    }
     const sol = await this.credentials.getDecryptedSolCredential(companyId);
     const result = await this.gateway.getStatus({ ticket: communication.ticket,
       credentials: { ruc: sol.ruc, solUsername: sol.username, solPassword: sol.password }, environment: sol.environment });
-    if (result.statusCode === '98') return { id, status: VoidCommunicationStatus.SENT, pending: true };
+    if (this.ticketPolicy) {
+      const decision = this.ticketPolicy.evaluate({
+        attempt: claimed.pollAttempt, sunatStatusCode: result.statusCode,
+        elapsedMs: Math.max(0, now.getTime() - (claimed.ticketSubmittedAt ?? claimed.updatedAt).getTime()), jitter: 0,
+      });
+      if (decision.outcome === 'PENDING') {
+        await this.prisma.voidCommunication.update({ where: { id }, data: { nextPollAt: new Date(now.getTime() + decision.nextDelayMs!) } });
+        return { id, status: VoidCommunicationStatus.SENT, pending: true };
+      }
+      if (decision.outcome !== 'PROCESS_CDR') {
+        await this.prisma.voidCommunication.update({ where: { id }, data: { status: VoidCommunicationStatus.ERROR,
+          sunatMessage: 'SUNAT ticket polling ended without a processable CDR.' } });
+        throw new ConflictException('SUNAT ticket polling ended without a processable CDR.');
+      }
+    } else if (result.statusCode === '98') return { id, status: VoidCommunicationStatus.SENT, pending: true };
     if (!result.cdrZip) throw new ConflictException('SUNAT completed the void ticket without a CDR.');
     const parsed = this.cdr.extractAndParse(result.cdrZip);
     const artifact = await this.storage.save(companyId, 'CDR', result.cdrZip);

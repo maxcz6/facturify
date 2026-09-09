@@ -131,7 +131,7 @@ describe('IdempotencyService (Pure Key Validation & Deterministic SHA-256 Finger
       const unicodeKeys = [
         'clave-idempotente-con-ñ-12345',
         'key-with-accent-áéíóú-12345',
-        'key-with-emoji-🚀-12345678',
+        'key-with-unicode-symbol-§-12345',
         'key-with-chinese-你好世界123',
       ];
 

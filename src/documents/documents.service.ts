@@ -5,6 +5,11 @@ import { CreateDocumentDto } from './dto/create-document.dto';
 import { PeruValidationService } from '../peru-validation/peru-validation.service';
 import { TaxCalculationService } from '../tax-calculation/tax-calculation.service';
 import { DocumentEventOutboxService } from '../outbox/document-event-outbox.service';
+import { SunatCatalogsService } from '../sunat-catalogs/sunat-catalogs.service';
+
+const SUNAT_DOCUMENT_CODE = {
+  INVOICE: '01', RECEIPT: '03', CREDIT_NOTE: '07', DEBIT_NOTE: '08',
+} as const;
 
 @Injectable()
 export class DocumentsService {
@@ -13,6 +18,7 @@ export class DocumentsService {
     private readonly peruValidation?: PeruValidationService,
     private readonly taxCalculation?: TaxCalculationService,
     private readonly eventOutbox?: DocumentEventOutboxService,
+    private readonly catalogs?: SunatCatalogsService,
   ) {}
 
   async create(
@@ -24,9 +30,14 @@ export class DocumentsService {
   ): Promise<Document> {
     this.peruValidation?.assertValidSeries(input.type, input.series);
     this.peruValidation?.assertValidCurrency(input.currency ?? 'PEN');
+    this.catalogs?.assertValidDocumentType(SUNAT_DOCUMENT_CODE[input.type]);
+    this.catalogs?.assertValidCurrency(input.currency ?? 'PEN');
     if (input.customerDocumentType || input.customerDocumentNumber) {
+      this.catalogs?.assertValidIdentityType(input.customerDocumentType);
       this.peruValidation?.assertValidIdentityDocument(input.customerDocumentType, input.customerDocumentNumber);
     }
+    if (input.type === 'CREDIT_NOTE') this.catalogs?.assertValidCreditNoteReason(input.adjustmentReasonCode);
+    if (input.type === 'DEBIT_NOTE') this.catalogs?.assertValidDebitNoteReason(input.adjustmentReasonCode);
     const company = await this.prisma.company.findUnique({ where: { id: input.companyId } });
     if (!company) throw new NotFoundException('Company not found.');
 
@@ -97,6 +108,7 @@ export class DocumentsService {
     if (reference.type !== 'INVOICE' && reference.type !== 'RECEIPT') {
       throw new NotFoundException('The referenced document cannot receive an adjustment note.');
     }
+    this.peruValidation?.assertValidSeries(input.type, input.series, reference.type);
 
     return this.create({
       ...input,
@@ -108,9 +120,4 @@ export class DocumentsService {
     });
   }
 
-  async findOne(id: string): Promise<Document> {
-    const document = await this.prisma.document.findUnique({ where: { id } });
-    if (!document) throw new NotFoundException('Document not found.');
-    return document;
-  }
 }

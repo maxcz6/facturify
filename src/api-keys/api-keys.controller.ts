@@ -27,6 +27,9 @@ import { ApiKeyResponseDto } from './dto/api-key-response.dto';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
 import { ApiKeyGuard } from './guards/api-key.guard';
 import { ApiKeyRecord } from './interfaces/api-key.interface';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { RequestId } from '../http-safety/decorators/request-id.decorator';
 
 @ApiTags('API Keys')
 @Controller('api-keys')
@@ -42,8 +45,8 @@ export class ApiKeysController {
     description: 'Requires Facturify Admin JWT. Returns the raw API key prefixed with fact_live_ or fact_test_. Save this key, it will only be shown once.',
   })
   @ApiCreatedResponse({ type: ApiKeyResponseDto })
-  async create(@Body() dto: CreateApiKeyDto): Promise<ApiKeyResponseDto> {
-    return this.apiKeysService.create(dto);
+  async create(@Body() dto: CreateApiKeyDto, @CurrentUser() actor?: JwtPayload, @RequestId() requestId?: string): Promise<ApiKeyResponseDto> {
+    return this.apiKeysService.create(dto, actor?.sub, requestId);
   }
 
   @Get('company/:companyId')
@@ -66,8 +69,8 @@ export class ApiKeysController {
     description: 'Immediately revokes the previous key and issues a fresh one.',
   })
   @ApiOkResponse({ type: ApiKeyResponseDto })
-  async rotate(@Param('id') id: string): Promise<ApiKeyResponseDto> {
-    return this.apiKeysService.rotate(id);
+  async rotate(@Param('id') id: string, @CurrentUser() actor?: JwtPayload, @RequestId() requestId?: string): Promise<ApiKeyResponseDto> {
+    return this.apiKeysService.rotate(id, actor?.sub, requestId);
   }
 
   @Delete(':id')
@@ -77,8 +80,8 @@ export class ApiKeysController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Revoke an API Key (Admin only)' })
   @ApiOkResponse({ type: ApiKeyResponseDto })
-  async revoke(@Param('id') id: string): Promise<ApiKeyResponseDto> {
-    return this.apiKeysService.revoke(id);
+  async revoke(@Param('id') id: string, @CurrentUser() actor?: JwtPayload, @RequestId() requestId?: string): Promise<ApiKeyResponseDto> {
+    return this.apiKeysService.revoke(id, actor?.sub, requestId);
   }
 
   @Get('verify')

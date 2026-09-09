@@ -48,7 +48,9 @@ export class CertificateStorageService implements OnModuleInit {
       // If filesystem write fails, attempt to clean temp file
       try {
         await fs.unlink(tempFile);
-      } catch {}
+      } catch {
+        // Best-effort cleanup; preserve the original write error.
+      }
       throw error;
     }
 

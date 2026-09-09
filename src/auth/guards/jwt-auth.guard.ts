@@ -7,10 +7,15 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
 import { JwtPayload } from '../interfaces/jwt-payload.interface';
+import { AdminTokenPolicyService } from '../../admin-token-policy/admin-token-policy.service';
+import { ADMIN_TOKEN_AUDIENCE, ADMIN_TOKEN_ISSUER } from '../../admin-token-policy/admin-token-policy.constants';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly tokenPolicy?: AdminTokenPolicyService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request & { user?: JwtPayload }>();
@@ -34,7 +39,17 @@ export class JwtAuthGuard implements CanActivate {
 
     try {
       const payload = await this.jwtService.verifyAsync<JwtPayload>(token);
-      request.user = payload;
+      if (this.tokenPolicy) {
+        const validation = this.tokenPolicy.validateClaims(payload, {
+          expectedIss: ADMIN_TOKEN_ISSUER,
+          expectedAud: ADMIN_TOKEN_AUDIENCE,
+          clockToleranceSeconds: 30,
+        });
+        if (!validation.valid) throw new Error('Invalid token policy.');
+        request.user = validation.claims;
+      } else {
+        request.user = payload;
+      }
       return true;
     } catch {
       throw new UnauthorizedException('Invalid or expired admin token.');

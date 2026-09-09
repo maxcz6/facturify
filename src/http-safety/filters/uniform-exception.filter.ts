@@ -50,6 +50,8 @@ export class UniformExceptionFilter implements ExceptionFilter {
     let error: string;
     let message: string | string[];
     let details: unknown;
+    let publicCode: string | undefined;
+    let retryAfterSeconds: number | undefined;
 
     if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
@@ -67,6 +69,13 @@ export class UniformExceptionFilter implements ExceptionFilter {
         error = body.error || HTTP_STATUS_NAMES[statusCode] || 'Http Exception';
         if (body.details !== undefined) {
           details = body.details;
+        }
+        if (typeof body.code === 'string' && /^[A-Z][A-Z0-9_]{1,63}$/.test(body.code)) {
+          publicCode = body.code;
+        }
+        if (statusCode === HttpStatus.TOO_MANY_REQUESTS && Number.isInteger(body.retryAfterSeconds)) {
+          retryAfterSeconds = Math.max(1, Math.min(3600, body.retryAfterSeconds));
+          if (!response.headersSent) response.setHeader('Retry-After', String(retryAfterSeconds));
         }
       } else {
         message = exception.message;
@@ -94,6 +103,8 @@ export class UniformExceptionFilter implements ExceptionFilter {
       error,
       message,
       ...(details !== undefined ? { details } : {}),
+      ...(publicCode !== undefined ? { code: publicCode } : {}),
+      ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
       path,
       timestamp,
       requestId,

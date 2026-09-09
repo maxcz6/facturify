@@ -10,6 +10,8 @@ import {
 import * as crypto from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
+import { AuditEventBuilderService } from '../audit-events/audit-events.service';
+import { AuditEventWriterService } from '../audit-events/audit-events-writer.service';
 import {
   ApiKeyRecord,
   CreatedApiKeyResult,
@@ -17,14 +19,18 @@ import {
 
 @Injectable()
 export class ApiKeysService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditBuilder?: AuditEventBuilderService,
+    private readonly auditWriter?: AuditEventWriterService,
+  ) {}
 
-  async create(dto: CreateApiKeyDto): Promise<CreatedApiKeyResult> {
+  async create(dto: CreateApiKeyDto, actorId?: string, requestId?: string): Promise<CreatedApiKeyResult> {
     const company = await this.prisma.company.findUnique({
       where: { id: dto.companyId },
     });
     if (!company) {
-      throw new NotFoundException(`Company with ID ${dto.companyId} not found.`);
+      throw new NotFoundException('Company not found.');
     }
 
     const envEnum =
@@ -49,6 +55,7 @@ export class ApiKeysService {
         status: ApiKeyStatus.ACTIVE,
       },
     });
+    await this.appendAudit('api_key.created', actorId, record.companyId, requestId);
 
     return {
       id: record.id,
@@ -90,33 +97,35 @@ export class ApiKeysService {
     return this.mapToRecord(updated);
   }
 
-  async rotate(id: string): Promise<CreatedApiKeyResult> {
+  async rotate(id: string, actorId?: string, requestId?: string): Promise<CreatedApiKeyResult> {
     const existing = await this.prisma.apiKey.findUnique({ where: { id } });
     if (!existing) {
-      throw new NotFoundException(`API Key with ID ${id} not found.`);
+      throw new NotFoundException('API Key not found.');
     }
 
-    // Revoke old key
-    await this.prisma.apiKey.update({
-      where: { id },
-      data: {
-        status: ApiKeyStatus.REVOKED,
-        revokedAt: new Date(),
-      },
+    const prefix = existing.environment === ApiKeyEnvironment.TEST ? 'fact_test_' : 'fact_live_';
+    const rawKey = `${prefix}${crypto.randomBytes(24).toString('base64url')}`;
+    const created = await this.prisma.$transaction(async (tx) => {
+      await tx.apiKey.update({ where: { id }, data: { status: ApiKeyStatus.REVOKED, revokedAt: new Date() } });
+      return tx.apiKey.create({ data: {
+        companyId: existing.companyId, name: `${existing.name} (Rotated)`,
+        keyHash: this.hashKey(rawKey), prefix, lastFour: rawKey.slice(-4),
+        environment: existing.environment, status: ApiKeyStatus.ACTIVE,
+      } });
     });
-
-    // Create new key with same parameters
-    return this.create({
-      companyId: existing.companyId,
-      name: `${existing.name} (Rotated)`,
-      environment: existing.environment.toLowerCase() as 'live' | 'test',
-    });
+    await this.appendAudit('api_key.rotated', actorId, created.companyId, requestId);
+    return {
+      id: created.id, companyId: created.companyId, name: created.name, apiKey: rawKey,
+      prefix: created.prefix, lastFour: created.lastFour,
+      environment: created.environment.toLowerCase() as 'live' | 'test',
+      status: created.status as 'ACTIVE' | 'REVOKED', createdAt: created.createdAt,
+    };
   }
 
-  async revoke(id: string): Promise<ApiKeyRecord> {
+  async revoke(id: string, actorId?: string, requestId?: string): Promise<ApiKeyRecord> {
     const existing = await this.prisma.apiKey.findUnique({ where: { id } });
     if (!existing) {
-      throw new NotFoundException(`API Key with ID ${id} not found.`);
+      throw new NotFoundException('API Key not found.');
     }
 
     const updated = await this.prisma.apiKey.update({
@@ -126,6 +135,7 @@ export class ApiKeysService {
         revokedAt: new Date(),
       },
     });
+    await this.appendAudit('api_key.revoked', actorId, updated.companyId, requestId);
 
     return this.mapToRecord(updated);
   }
@@ -142,7 +152,7 @@ export class ApiKeysService {
   async findById(id: string): Promise<ApiKeyRecord> {
     const record = await this.prisma.apiKey.findUnique({ where: { id } });
     if (!record) {
-      throw new NotFoundException(`API Key with ID ${id} not found.`);
+      throw new NotFoundException('API Key not found.');
     }
     return this.mapToRecord(record);
   }
@@ -156,7 +166,6 @@ export class ApiKeysService {
       id: record.id,
       companyId: record.companyId,
       name: record.name,
-      keyHash: record.keyHash,
       prefix: record.prefix,
       lastFour: record.lastFour,
       environment: record.environment.toLowerCase() as 'live' | 'test',
@@ -165,5 +174,17 @@ export class ApiKeysService {
       lastUsedAt: record.lastUsedAt ?? undefined,
       revokedAt: record.revokedAt ?? undefined,
     };
+  }
+
+  private async appendAudit(
+    action: 'api_key.created' | 'api_key.rotated' | 'api_key.revoked',
+    actorId: string | undefined,
+    companyId: string,
+    requestId?: string,
+  ): Promise<void> {
+    if (!actorId || !this.auditBuilder || !this.auditWriter) return;
+    await this.auditWriter.append(this.auditBuilder.buildApiKeyAction({
+      action, actorId, companyId, requestId,
+    }));
   }
 }

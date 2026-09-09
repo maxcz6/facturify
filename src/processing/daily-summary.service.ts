@@ -11,6 +11,7 @@ import { SunatZipService } from '../xml/sunat-zip.service';
 import { UblDailySummaryService } from '../xml/ubl-daily-summary.service';
 import { XmlSignatureService } from '../xml/xml-signature.service';
 import { DocumentEventOutboxService } from '../outbox/document-event-outbox.service';
+import { SunatTicketPollingPolicyService } from '../sunat-ticket-policy/sunat-ticket-polling-policy.service';
 
 @Injectable()
 export class DailySummaryService {
@@ -26,6 +27,7 @@ export class DailySummaryService {
     @Inject(SUNAT_GATEWAY) private readonly gateway: SunatGateway,
     private readonly cdr: CdrService,
     private readonly eventOutbox?: DocumentEventOutboxService,
+    private readonly ticketPolicy?: SunatTicketPollingPolicyService,
   ) {}
 
   async createAndSend(companyId: string, referenceDateInput: string) {
@@ -82,7 +84,8 @@ export class DailySummaryService {
         environment: sol.environment,
       });
       await this.prisma.dailySummary.update({
-        where: { id: summary.id }, data: { status: DailySummaryStatus.SENT, ticket: sent.ticket, zipArtifactId },
+        where: { id: summary.id }, data: { status: DailySummaryStatus.SENT, ticket: sent.ticket, zipArtifactId,
+          pollAttempt: 0, ticketSubmittedAt: new Date(), nextPollAt: null },
       });
       return { id: summary.id, status: DailySummaryStatus.SENT, ticket: sent.ticket, documentCount: receipts.length };
     } catch (error) {
@@ -100,13 +103,41 @@ export class DailySummaryService {
     if (summary.status !== DailySummaryStatus.SENT || !summary.ticket) {
       throw new ConflictException('Daily summary does not have a pending SUNAT ticket.');
     }
+    const now = new Date();
+    if (this.ticketPolicy && summary.nextPollAt && summary.nextPollAt > now) {
+      throw new ConflictException('SUNAT ticket is not ready for another status check.');
+    }
+    let claimed = summary;
+    if (this.ticketPolicy) {
+      const leaseUntil = new Date(now.getTime() + 120_000);
+      const claim = await this.prisma.dailySummary.updateMany({
+        where: { id: summary.id, status: DailySummaryStatus.SENT,
+          OR: [{ nextPollAt: null }, { nextPollAt: { lte: now } }] },
+        data: { pollAttempt: { increment: 1 }, nextPollAt: leaseUntil },
+      });
+      if (claim.count !== 1) throw new ConflictException('SUNAT ticket status check is already in progress.');
+      claimed = (await this.prisma.dailySummary.findUnique({ where: { id: summary.id }, include: { documents: true } }))!;
+    }
     const sol = await this.credentials.getDecryptedSolCredential(companyId);
     const result = await this.gateway.getStatus({
       ticket: summary.ticket,
       credentials: { ruc: sol.ruc, solUsername: sol.username, solPassword: sol.password },
       environment: sol.environment,
     });
-    if (result.statusCode === '98') return { id: summary.id, status: DailySummaryStatus.SENT, pending: true };
+    if (this.ticketPolicy) {
+      const decision = this.ticketPolicy.evaluate({
+        attempt: claimed.pollAttempt, sunatStatusCode: result.statusCode,
+        elapsedMs: Math.max(0, now.getTime() - (claimed.ticketSubmittedAt ?? claimed.updatedAt).getTime()), jitter: 0,
+      });
+      if (decision.outcome === 'PENDING') {
+        await this.prisma.dailySummary.update({ where: { id: summary.id }, data: { nextPollAt: new Date(now.getTime() + decision.nextDelayMs!) } });
+        return { id: summary.id, status: DailySummaryStatus.SENT, pending: true };
+      }
+      if (decision.outcome !== 'PROCESS_CDR') {
+        await this.prisma.dailySummary.update({ where: { id: summary.id }, data: { status: DailySummaryStatus.ERROR, sunatMessage: 'SUNAT ticket polling ended without a processable CDR.' } });
+        throw new ConflictException('SUNAT ticket polling ended without a processable CDR.');
+      }
+    } else if (result.statusCode === '98') return { id: summary.id, status: DailySummaryStatus.SENT, pending: true };
     if (!result.cdrZip) throw new ConflictException(`SUNAT completed ticket without a CDR (status ${result.statusCode}).`);
     const parsed = this.cdr.extractAndParse(result.cdrZip);
     const artifact = await this.storage.save(companyId, 'CDR', result.cdrZip);
