@@ -321,3 +321,4 @@ Para otra URL: `E2E_API_URL=https://api.example.com npm run test:e2e`.
 ## Licencia
 
 Software propietario desarrollado para Facturify. Todos los derechos reservados.
+open source  
